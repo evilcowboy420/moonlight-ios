@@ -1,15 +1,52 @@
-name: Build patched IPA
-on: push
+name: Build unsigned IPA for ESign
+on: 
+  workflow_dispatch:
+  push:
+    branches: [ master, main ]
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build
+
+      - name: Clone Moonlight with keyboard fix
         run: |
-          xcodebuild -workspace Moonlight.xcworkspace -scheme Moonlight -configuration Release -archivePath build/Moonlight.xcarchive archive CODE_SIGNING_ALLOWED=NO || true
-          mkdir -p build
-      - uses: actions/upload-artifact@v4
+          rm -rf moonlight-src
+          git clone --recursive https://github.com/xxjsonderuloxx/moonlight-ios-zwm.git moonlight-src
+          ls -la moonlight-src
+          ls -la moonlight-src/Moonlight.xcodeproj || ls -la moonlight-src/*.xcodeproj
+
+      - name: Build .app with no signing
+        run: |
+          cd moonlight-src
+          xcodebuild -project Moonlight.xcodeproj \
+            -scheme Moonlight \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath $RUNNER_TEMP/derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH=$(find $RUNNER_TEMP/derived/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
+          echo "Found app at $APP_PATH"
+          test -n "$APP_PATH"
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -R "$APP_PATH" $RUNNER_TEMP/Payload/
+          cd $RUNNER_TEMP
+          zip -r Moonlight-unsigned.ipa Payload
+          ls -lh Moonlight-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
         with:
-          name: Moonlight-patched
-          path: build/
+          name: Moonlight-unsigned-ipa
+          path: ${{ runner.temp }}/Moonlight-unsigned.ipa
+          retention-days: 7
