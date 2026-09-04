@@ -840,21 +840,35 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 
 - (void)sendLowLevelEvent:(struct KeyEvent)event {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        // When we want to send a modified key (like uppercase letters) we need to send the
-        // modifier ("shift") seperately from the key itself.
+        // FIX: Magic Keyboard fast double-tap (bookkeeper bug)
+        // If key is still down from previous 50ms window, send UP first
+        @synchronized(self->keysDown) {
+            if ([self->keysDown containsObject:@(event.keycode)]) {
+                LiSendKeyboardEvent2(event.keycode, KEY_ACTION_UP, event.modifier, SS_KBE_FLAG_NON_NORMALIZED);
+                [self->keysDown removeObject:@(event.keycode)];
+                usleep(10 * 1000); // 10ms gap for host to register
+            }
+        }
+        
         if (event.modifier != 0) {
             LiSendKeyboardEvent(event.modifierKeycode, KEY_ACTION_DOWN, event.modifier);
         }
-        // Let the host know these are not (necessarily) normalized to US English scancodes
+        
+        @synchronized(self->keysDown) {
+            [self->keysDown addObject:@(event.keycode)];
+        }
         LiSendKeyboardEvent2(event.keycode, KEY_ACTION_DOWN, event.modifier, SS_KBE_FLAG_NON_NORMALIZED);
         usleep(50 * 1000);
         LiSendKeyboardEvent2(event.keycode, KEY_ACTION_UP, event.modifier, SS_KBE_FLAG_NON_NORMALIZED);
+        @synchronized(self->keysDown) {
+            [self->keysDown removeObject:@(event.keycode)];
+        }
+        
         if (event.modifier != 0) {
             LiSendKeyboardEvent(event.modifierKeycode, KEY_ACTION_UP, event.modifier);
         }
     });
 }
-
 - (BOOL)canBecomeFirstResponder {
     return YES;
 }
